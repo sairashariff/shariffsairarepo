@@ -1,0 +1,57 @@
+{
+  "title": "Orders API tenant rate limiting",
+  "uid": "orders-tenant-rate-limits",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["orders", "KAN-48"],
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "HTTP 429s per second by tenant",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [{
+        "refId": "A",
+        "expr": "sum by (tenant) (rate(orders_rate_limit_decisions_total{mode=\"enforce\",outcome=\"rejected\"}[5m]))",
+        "legendFormat": "{{tenant}}"
+      }]
+    },
+    {
+      "id": 2,
+      "title": "HTTP 429 ratio by tenant",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "targets": [{
+        "refId": "A",
+        "expr": "sum by (tenant) (rate(orders_rate_limit_decisions_total{mode=\"enforce\",outcome=\"rejected\"}[5m])) / sum by (tenant) (rate(orders_rate_limit_decisions_total{mode=\"enforce\"}[5m]))",
+        "legendFormat": "{{tenant}}"
+      }]
+    },
+    {
+      "id": 3,
+      "title": "Log-only would-reject requests per second",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [{
+        "refId": "A",
+        "expr": "sum by (tenant) (rate(orders_rate_limit_decisions_total{mode=\"log-only\",outcome=\"would_reject\"}[5m]))",
+        "legendFormat": "{{tenant}}"
+      }]
+    },
+    {
+      "id": 4,
+      "title": "Limiter p95 duration (target <5 ms)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [{
+        "refId": "A",
+        "expr": "histogram_quantile(0.95, sum by (le, mode) (rate(orders_rate_limit_duration_seconds_bucket[5m])))",
+        "legendFormat": "{{mode}}"
+      }]
+    }
+  ]
+}
