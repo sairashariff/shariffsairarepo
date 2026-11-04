@@ -41,6 +41,21 @@ describe.skipIf(process.env.RUN_REDIS_TESTS !== "1")("real Redis integration", (
     expect((await consume(store, tenant(), 60)).allowed).toBe(true);
     expect(await store.ttl(tenantKeys(id).bucket)).toBeGreaterThan(60);
   });
+  it("derives relative and absolute reset times from the same Redis clock", async () => {
+    const id = tenant();
+    const clock = () => store.eval("return redis.call('TIME')", { keys: [tenantKeys(id).bucket], arguments: [] });
+    const before = await clock();
+    const decision = await consume(store, id, 60);
+    const after = await clock();
+    if (!Array.isArray(before) || typeof before[0] !== "string" ||
+        !Array.isArray(after) || typeof after[0] !== "string") throw new Error("Unexpected Redis TIME response");
+    const decisionTime = decision.resetAtEpochSeconds - decision.retryAfterSeconds;
+    expect(decisionTime).toBeGreaterThanOrEqual(Number(before[0]));
+    expect(decisionTime).toBeLessThanOrEqual(Number(after[0]));
+    expect(decision.resetAtEpochSeconds % 60).toBe(0);
+    expect(decision.retryAfterSeconds).toBeGreaterThanOrEqual(1);
+    expect(decision.retryAfterSeconds).toBeLessThanOrEqual(60);
+  });
   it("does not continuously refill an exhausted bucket and refills at the next minute", async () => {
     const id = tenant();
     const bucket = tenantKeys(id).bucket;
@@ -85,7 +100,17 @@ describe.skipIf(process.env.RUN_REDIS_TESTS !== "1")("real Redis integration", (
       .send({ items: [{ sku: "SKU-1", quantity: 1 }] }).expect(201);
     await request(app).get(`/orders/${order.body.id}`).set("Authorization", bearer(keys.other)).expect(404);
     await request(app).put(`/admin/tenants/${id}/rate-limit`).set("Authorization", bearer(keys.admin)).send({ limit: 1 }).expect(200);
-    await request(app).get("/orders").set("Authorization", bearer()).expect(429);
+    const limited = await request(app).get("/orders").set("Authorization", bearer()).expect(429);
+    expect(limited.headers).toMatchObject({
+      "ratelimit-limit": "1", "ratelimit-remaining": "0",
+      "x-ratelimit-limit": "1", "x-ratelimit-remaining": "0",
+      "retry-after": String(limited.body.error.retryAfterSeconds),
+      "ratelimit-reset": String(limited.body.error.retryAfterSeconds),
+    });
+    const reset = Number(limited.headers["x-ratelimit-reset"]);
+    expect(Number.isSafeInteger(reset)).toBe(true);
+    expect(reset).toBeGreaterThan(0);
+    expect(reset % 60).toBe(0);
     await request(app).put(`/admin/tenants/${id}/rate-limit`).set("Authorization", bearer(keys.admin)).send({ limit: 100 }).expect(200);
     await request(app).get("/orders").set("Authorization", bearer()).expect(200);
     await request(app).get("/orders").set("Authorization", bearer(keys.service)).expect(200);

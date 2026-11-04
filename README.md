@@ -66,8 +66,14 @@ All authenticated public endpoints and unknown public paths share one bucket
 per tenant across API instances. Authenticated service traffic, health, admin
 routes, and metrics do not consume tenant quota. Invalid authenticated public
 requests do consume quota. Overrides take effect on the next request, without
-a cache or process restart. On 429, both `Retry-After` and
-`error.retryAfterSeconds` specify seconds until the next minute.
+a cache or process restart. Evaluated tenant responses include both
+`RateLimit-Limit`/`RateLimit-Remaining`/`RateLimit-Reset` and legacy
+`X-RateLimit-Limit`/`X-RateLimit-Remaining`/`X-RateLimit-Reset` headers.
+Limit and remaining values match across formats; `RateLimit-Reset` is seconds
+until refill, while `X-RateLimit-Reset` is the refill's Unix timestamp in seconds.
+Every 429 includes `Retry-After`, matching `RateLimit-Reset` and JSON
+`error.retryAfterSeconds`. Log-only responses include both header formats but
+no `Retry-After`; off mode and exempt callers include neither format.
 
 See the [technical spec and rollout gates](docs/rate-limiting.md),
 [observability setup](observability/README.md), and

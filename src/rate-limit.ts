@@ -23,7 +23,8 @@ if tokens >= 1 then
 end
 redis.call('HSET', KEYS[1], 'minute', minute, 'tokens', tokens, 'capacity', capacity)
 redis.call('EXPIRE', KEYS[1], 120)
-return {allowed, capacity, math.max(0, tokens), 60 - (now % 60)}
+local reset = (minute + 1) * 60
+return {allowed, capacity, math.max(0, tokens), reset - now, reset}
 `;
 
 export function tenantKeys(tenantId: string): { bucket: string; override: string; orders: string } {
@@ -37,6 +38,7 @@ export interface BucketDecision {
   limit: number;
   remaining: number;
   retryAfterSeconds: number;
+  resetAtEpochSeconds: number;
 }
 
 export async function consume(store: RedisStore, tenantId: string, limit: number): Promise<BucketDecision> {
@@ -55,16 +57,20 @@ export async function consume(store: RedisStore, tenantId: string, limit: number
     clearTimeout(deadline);
   }
   if (
-    !Array.isArray(result) || result.length !== 4 ||
+    !Array.isArray(result) || result.length !== 5 ||
     !result.every((value: unknown) => typeof value === "number" && Number.isSafeInteger(value)) ||
     (result[0] !== 0 && result[0] !== 1) ||
     result[1] < 1 || result[1] > 1_000_000 ||
     result[2] < 0 || result[2] > result[1] ||
-    result[3] < 1 || result[3] > 60
+    result[3] < 1 || result[3] > 60 ||
+    result[4] < 1 || result[4] % 60 !== 0
   ) {
     throw new Error("Redis returned an invalid token-bucket decision");
   }
-  return { allowed: result[0] === 1, limit: result[1], remaining: result[2], retryAfterSeconds: result[3] };
+  return {
+    allowed: result[0] === 1, limit: result[1], remaining: result[2],
+    retryAfterSeconds: result[3], resetAtEpochSeconds: result[4],
+  };
 }
 
 export function rateLimit(options: {
@@ -112,11 +118,13 @@ export function rateLimit(options: {
       "RateLimit-Limit": String(decision.limit),
       "RateLimit-Remaining": String(decision.remaining),
       "RateLimit-Reset": String(decision.retryAfterSeconds),
+      "X-RateLimit-Limit": String(decision.limit),
+      "X-RateLimit-Remaining": String(decision.remaining),
+      "X-RateLimit-Reset": String(decision.resetAtEpochSeconds),
     });
     if (!decision.allowed && mode === "enforce") {
-      res.set("Retry-After", String(decision.retryAfterSeconds));
       record("rejected");
-      res.status(429).json({
+      res.set("Retry-After", String(decision.retryAfterSeconds)).status(429).json({
         error: { code: "RATE_LIMIT_EXCEEDED", message: "Tenant request limit exceeded", retryAfterSeconds: decision.retryAfterSeconds },
       });
       return;

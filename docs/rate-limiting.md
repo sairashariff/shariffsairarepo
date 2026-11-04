@@ -59,10 +59,23 @@ Admin mutations emit structured audit events without API keys.
   `error.code=RATE_LIMIT_EXCEEDED`, `error.retryAfterSeconds`, and `Retry-After`.
   Limiter errors fail closed with HTTP 503 and a five-second retry hint.
 
-Enabled responses carry `RateLimit-Limit`, `RateLimit-Remaining`, and
-`RateLimit-Reset` (seconds until refill). Log-only does not send `Retry-After`
-because the request was not rejected. A rejected request never reaches Orders
-storage. The limiter applies a 200 ms application-level Redis round-trip
+Every successfully evaluated tenant response in an enabled mode carries both
+header formats, including allowed responses and quota rejections:
+
+| Header | Legacy header | Value |
+|---|---|---|
+| `RateLimit-Limit` | `X-RateLimit-Limit` | Effective capacity, including overrides |
+| `RateLimit-Remaining` | `X-RateLimit-Remaining` | Nonnegative remaining tokens after the decision |
+| `RateLimit-Reset` | `X-RateLimit-Reset` | Relative seconds until refill / absolute Unix-epoch seconds, respectively |
+
+Both reset values come from the same Redis TIME decision, not the API host's
+clock. Every HTTP 429 includes a positive integer `Retry-After` matching
+`RateLimit-Reset` and JSON `error.retryAfterSeconds` (1-60 seconds).
+Log-only does not send `Retry-After` because the request was not rejected.
+Off mode, exempt callers, and limiter failures do not emit either rate-limit
+header format; enforce-mode limiter failures retain the five-second 503 retry
+hint. A rejected request never reaches Orders storage.
+The limiter applies a 200 ms application-level Redis round-trip
 deadline: the Redis client's own command timeout only bounds the write queue.
 The client also disables offline queuing, bounds the command queue at 10,000,
 and bounds connection retries. A timed-out in-flight command may still consume

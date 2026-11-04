@@ -26,9 +26,10 @@ export const config: Config = {
   ],
 };
 export const bearer = (key = keys.free) => `Bearer ${key}`;
+export const resetAtEpochSeconds = 1_800_000_000;
 export function fakeStore(): RedisStore {
   return {
-    eval: vi.fn<RedisStore["eval"]>().mockResolvedValue([1, 60, 59, 42]),
+    eval: vi.fn<RedisStore["eval"]>().mockResolvedValue([1, 60, 59, 42, resetAtEpochSeconds]),
     set: vi.fn<RedisStore["set"]>().mockResolvedValue("OK"),
     del: vi.fn<RedisStore["del"]>().mockResolvedValue(1),
     hSet: vi.fn<RedisStore["hSet"]>().mockResolvedValue(1),

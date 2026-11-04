@@ -58,7 +58,16 @@ try {
   assert.equal((await call(overridePath, adminKey, { method: "PUT", body: '{"limit":1}' })).status, 200);
   const limited = await call("/orders");
   assert.equal(limited.status, 429);
-  assert.ok(limited.headers.get("retry-after"));
+  const retryAfter = limited.headers.get("retry-after");
+  assert.ok(retryAfter && /^[1-9]\d*$/.test(retryAfter) && Number(retryAfter) <= 60);
+  assert.equal(limited.headers.get("ratelimit-reset"), retryAfter);
+  assert.equal((await limited.json()).error.retryAfterSeconds, Number(retryAfter));
+  assert.equal(limited.headers.get("ratelimit-limit"), "1");
+  assert.equal(limited.headers.get("x-ratelimit-limit"), "1");
+  assert.equal(limited.headers.get("ratelimit-remaining"), "0");
+  assert.equal(limited.headers.get("x-ratelimit-remaining"), "0");
+  const reset = Number(limited.headers.get("x-ratelimit-reset"));
+  assert.ok(Number.isSafeInteger(reset) && reset > 0 && reset % 60 === 0);
   assert.equal((await call(overridePath, adminKey, { method: "PUT", body: '{"limit":100}' })).status, 200);
   await store.connect();
   // Only run this script against a dedicated standalone test Redis: it briefly pauses that server.
